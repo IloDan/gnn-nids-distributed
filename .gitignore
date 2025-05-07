@@ -1,0 +1,14 @@
+# File di log
+*.log
+
+# Cartelle 
+/data/
+/GNN/models/
+/models/
+
+# File di configurazione locali
+config.local.json
+
+# File generati da IDE
+.vscode/
+.idea/
