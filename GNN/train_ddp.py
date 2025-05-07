@@ -195,8 +195,8 @@ def main():
             f1_malicious = report_df.loc["Malicious", "f1-score"]
             precision = report_df.loc["Malicious", "precision"]
             recall = report_df.loc["Malicious", "recall"]
-            print(f"✅Training Time: {train_time:.2f} seconds")
-            print(f"✅Test Time: {test_time:.2f} seconds")
+            print(f"✅Training Time: {train_time:.4f} seconds")
+            print(f"✅Test Time: {test_time:.4f} seconds")
             results.append({
                 "attack_cat": name,
                 "device": 'cuda:2',

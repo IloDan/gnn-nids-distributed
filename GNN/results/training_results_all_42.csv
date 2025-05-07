@@ -1,2 +1,10 @@
-attack_cat,device,training_time_sec,accuracy,f1_malicious,precision_malicious,recall_malicious
-full,cuda,102.48,0.99162,0.96661,0.96547,0.96776
+attack_cat,device,graph_time,train_time,test_time,peak_memory,accuracy,f1_malicious,precision_malicious,recall_malicious
+full,cuda:2,19.09,102.68,0.6353,16139.82,0.99162,0.96657,0.96592,0.96723
+dos,cuda:2,1.95,13.43,0.0947,2533.47,0.99805,0.97943,0.98306,0.97583
+fuzzers,cuda:2,2.73,17.96,0.1082,3307.57,0.98861,0.89208,0.81283,0.98846
+exploits,cuda:2,5.28,33.83,0.1899,6018.14,0.99696,0.96845,0.95717,0.98
+generic,cuda:2,16.54,91.4,0.5682,15403.39,0.99947,0.9971,0.99873,0.99548
+reconnaissance,cuda:2,1.88,13.21,0.0817,2478.64,0.99955,0.9953,0.99403,0.99658
+analysis,cuda:2,0.28,2.5,0.024,473.68,0.99864,0.98585,0.97436,0.99761
+shellcode,cuda:2,0.16,1.52,0.0192,276.15,0.99835,0.98276,0.97436,0.9913
+backdoor,cuda:2,0.24,2.18,0.0225,406.11,0.99825,0.98161,0.983,0.98023

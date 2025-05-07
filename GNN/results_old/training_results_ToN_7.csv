@@ -1,0 +1,9 @@
+attack_cat,device,training_time_sec,accuracy,f1_malicious,precision_malicious,recall_malicious
+dos,cuda,18.26,0.99938,0.99657,0.99885,0.9943
+ddos,cuda,17.13,0.999,0.99449,0.99355,0.99544
+backdoor,cuda,16.32,0.99995,0.99971,1.0,0.99943
+injection,cuda,16.15,0.99896,0.99431,0.99205,0.99658
+password,cuda,16.77,0.99948,0.99715,0.99621,0.9981
+ransomware,cuda,16.34,1.0,1.0,1.0,1.0
+scanning,cuda,16.58,0.99945,0.99696,0.9981,0.99582
+xss,cuda,16.64,0.99948,0.99714,1.0,0.9943
