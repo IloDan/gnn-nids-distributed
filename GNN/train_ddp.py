@@ -96,6 +96,8 @@ def train(rank, world_size, G_full, num_epochs=100, lr=1e-3, save_path=None, see
     start_train = time.perf_counter()
 
     model.train()
+    if th.cuda.is_available():
+        th.cuda.reset_peak_memory_stats(device)
     for epoch in range(num_epochs):
         pred = model(G, node_features, edge_features)
         loss = criterion(pred[train_mask], labels[train_mask])
@@ -119,7 +121,11 @@ def train(rank, world_size, G_full, num_epochs=100, lr=1e-3, save_path=None, see
     # if save_path and rank == 0:
         # th.save(model.module.state_dict(), save_path)
     test_time = time.perf_counter() - start_test
-    return train_time, test_time,  report_df
+    if th.cuda.is_available():
+        th.cuda.synchronize()  # Assicura che tutto sia completato
+        peak_mem = th.cuda.max_memory_allocated(device) / 1024**2
+        print(f"[GPU {rank}] 🚀 Picco memoria GPU allocata: {peak_mem:.2f} MB")
+    return train_time, test_time,  peak_mem, report_df
 
 
 def main():
@@ -182,7 +188,7 @@ def main():
         print(f"\n🚀 Addestramento del modello '{name.upper()}'")
         save_path = f"GNN/models/model_{name}_{protocols}_ddp_{seed}.pth" 
 
-        train_time, test_time, report_df = train(rank, world_size, G_dgl, 200, 1e-3, save_path, seed=seed)
+        train_time, test_time,peak_mem, report_df = train(rank, world_size, G_dgl, 200, 1e-3, save_path, seed=seed)
         
         if rank == 0:
             accuracy = report_df.loc["accuracy", "f1-score"]
@@ -197,6 +203,7 @@ def main():
                 "graph_time": round(graph_time, 2),
                 "train_time": round(train_time, 2),
                 "test_time": round(test_time, 4),
+                "peak_memory": round(peak_mem, 2),
                 "accuracy": round(accuracy, 5),
                 "f1_malicious": round(f1_malicious, 5),
                 "precision_malicious": round(precision, 5),

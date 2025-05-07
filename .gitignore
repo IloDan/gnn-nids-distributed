@@ -1,5 +1,6 @@
 # File di log
 *.log
+*.pyc
 
 # Cartelle 
 /data/

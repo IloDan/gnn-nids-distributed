@@ -43,6 +43,8 @@ def train_egraphsage(G, num_epochs=200, lr=1e-3, device='cpu', verbose=True, see
     start_time = timeit.default_timer()
 
     model.train()
+    if th.cuda.is_available():
+        th.cuda.reset_peak_memory_stats(device)
     for epoch in tqdm(range(1, num_epochs + 1), desc=f"Training ({device})"):
         pred = model(G, node_features, edge_features).to(device)
         loss = criterion(pred[train_mask], labels[train_mask])
@@ -71,8 +73,11 @@ def train_egraphsage(G, num_epochs=200, lr=1e-3, device='cpu', verbose=True, see
         print("\n📊 Test set performance:")
         print(report_df)
     test_time = timeit.default_timer() - start_time
-
-    return model, train_time, test_time, report_df
+    if th.cuda.is_available():
+        th.cuda.synchronize()  # Assicura che tutto sia completato
+        peak_mem = th.cuda.max_memory_allocated(device) / 1024**2
+        print(f"[GPU 🚀 Picco memoria GPU allocata: {peak_mem:.2f} MB")
+    return model, train_time, test_time, peak_mem, report_df
 
 
 def main():
@@ -134,7 +139,7 @@ def main():
                 continue
 
             print(f"\n🚀 Addestramento del modello '{name.upper()}' su {device.upper()}")
-            model, train_time, test_time, report_df = train_egraphsage(G_dgl, num_epochs=200, lr=1e-3, device=device, verbose=True, seed=seed)
+            model, train_time, test_time, peak_mem, report_df = train_egraphsage(G_dgl, num_epochs=200, lr=1e-3, device=device, verbose=True, seed=seed)
 
             accuracy = report_df.loc["accuracy", "f1-score"]
             f1_malicious = report_df.loc["Malicious", "f1-score"]
@@ -143,10 +148,11 @@ def main():
 
             results.append({
                 "attack_cat": name,
-                "device": device,
+                "device": 'cuda:2',
                 "graph_time": round(graph_time, 2),
                 "train_time": round(train_time, 2),
                 "test_time": round(test_time, 4),
+                "peak_memory": round(peak_mem, 2),
                 "accuracy": round(accuracy, 5),
                 "f1_malicious": round(f1_malicious, 5),
                 "precision_malicious": round(precision, 5),
