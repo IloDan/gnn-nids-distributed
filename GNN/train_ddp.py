@@ -8,7 +8,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 import dgl
 import pandas as pd
 from sklearn.metrics import classification_report
-from dataload import preprocess_NUSW_dataset, preprocess_ToN_dataset, preprocess_NUSW_dataset_optimized
+from dataload import preprocess_NUSW_dataset, preprocess_ToN_dataset, preprocess_NUSW_dataset_optimized, preprocess_ToN_dataset_optimized, preprocess_partitioned_dataset_optimized
 from EGraphSAGE import EGraphSAGE, compute_accuracy
 
 def set_seed(seed):
@@ -69,13 +69,15 @@ def synchronize_node_embeddings(G, async_op=True):
     return None, None
 
 
-def train(rank, world_size, G_full, num_epochs=100, lr=1e-3, save_path=None, seed=42):
+def train(rank, world_size, G_full,protocols, num_epochs=100, lr=1e-3, save_path=None, seed=42):
     
     set_seed(seed)
 
     device = th.device(f'cuda:{rank}')
-    # G = stratified_partition_graph_edges(G_full, rank, world_size)
-    G = partition_graph_edges(G_full, rank, world_size)
+    if protocols != 'part':
+        G = partition_graph_edges(G_full, rank, world_size)
+    else:
+        G=G_full
     G = G.to(device)
     node_features = G.ndata['h']
     edge_features = G.edata['h']
@@ -130,7 +132,7 @@ def train(rank, world_size, G_full, num_epochs=100, lr=1e-3, save_path=None, see
 
 def main():
     seed = int(os.environ.get("SEED", 42))
-    protocols = os.environ.get("PROTOCOLS", "all")
+    protocols = os.environ.get("PROTOCOLS", "part")
     if protocols == 'tcp':
 
         datasets = {
@@ -143,7 +145,7 @@ def main():
 
         }
 
-    elif protocols == 'all':
+    elif protocols == 'all' or protocols == 'part':
         datasets = {
                 'full': pd.read_csv('data/NUSW_NB15/UNSW-NB15_processed.csv'),
                 'dos': pd.read_csv('data/NUSW_NB15/attack_cat/UNSW-NB15_dos.csv'),
@@ -179,7 +181,11 @@ def main():
         print(f"\n📦 Costruzione grafo per: {name.upper()}")
         start_time = time.perf_counter()
         if protocols == 'ToN':
-            G_dgl, _ = preprocess_ToN_dataset(df, scaler_type='standard')
+            G_dgl, _ = preprocess_ToN_dataset_optimized(df, scaler_type='standard')
+        elif protocols == 'part':
+            G_dgl = preprocess_partitioned_dataset_optimized(df, rank, world_size, protocols)
+        elif protocols == 'ToN_part':
+            G_dgl, _ = preprocess_ToN_dataset_optimized(df, scaler_type='standard')
         else:
             G_dgl, _ = preprocess_NUSW_dataset_optimized(df, protocols, scaler_type='standard')
 
@@ -188,7 +194,7 @@ def main():
         print(f"\n🚀 Addestramento del modello '{name.upper()}'")
         save_path = f"GNN/models/model_{name}_{protocols}_ddp_{seed}.pth" 
 
-        train_time, test_time,peak_mem, report_df = train(rank, world_size, G_dgl, 200, 1e-3, save_path, seed=seed)
+        train_time, test_time,peak_mem, report_df = train(rank, world_size, G_dgl, protocols, 200, 1e-3, save_path, seed=seed)
         
         if rank == 0:
             accuracy = report_df.loc["accuracy", "f1-score"]
@@ -212,7 +218,7 @@ def main():
     cleanup()
 
     results_df = pd.DataFrame(results)
-    results_df.to_csv(f"GNN/results/ddp_training_results_{protocols}_{seed}_opt.csv", index=False)
+    results_df.to_csv(f"GNN/results/ddp_training_results_{protocols}_{seed}.csv", index=False)
     print(f"\n📄 Risultati salvati in GNN/results/ddp_training_results_{protocols}_{seed}.csv.csv")
 
 if __name__ == "__main__":
