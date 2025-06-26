@@ -1,7 +1,7 @@
 #!/bin/bash
 
 SEEDS=(42 123 999 2025 7)
-PROTOCOLS=("all" "ToN")
+PROTOCOLS=("ToN")
 
 source ~/miniconda3/etc/profile.d/conda.sh
 conda activate KC

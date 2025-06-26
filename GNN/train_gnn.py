@@ -5,8 +5,11 @@ import torch.nn.functional as F
 import pandas as pd
 from tqdm import tqdm
 from sklearn.metrics import classification_report
-from dataload import preprocess_NUSW_dataset, preprocess_ToN_dataset, preprocess_NUSW_dataset_optimized
+from dataload import preprocess_NUSW_dataset_optimized, preprocess_ToN_dataset_optimized
 from EGraphSAGE import EGraphSAGE, compute_accuracy
+from sklearn.metrics import balanced_accuracy_score, confusion_matrix
+import seaborn as sns
+import matplotlib.pyplot as plt
 
 def set_seed(seed):
     import random
@@ -20,6 +23,11 @@ def set_seed(seed):
 
 def train_egraphsage(G, num_epochs=200, lr=1e-3, device='cpu', verbose=True, seed=42):
     set_seed(seed)
+
+    if device == 'cuda' and th.cuda.is_available():
+        th.cuda.empty_cache()              # libera la cache
+        th.cuda.reset_peak_memory_stats() 
+        
     device = th.device(device)
     G = G.to(device)
 
@@ -43,8 +51,9 @@ def train_egraphsage(G, num_epochs=200, lr=1e-3, device='cpu', verbose=True, see
     start_time = timeit.default_timer()
 
     model.train()
-    if th.cuda.is_available():
-        th.cuda.reset_peak_memory_stats(device)
+    if device == 'cuda':
+        if th.cuda.is_available():
+            th.cuda.reset_peak_memory_stats(device)
     for epoch in tqdm(range(1, num_epochs + 1), desc=f"Training ({device})"):
         pred = model(G, node_features, edge_features).to(device)
         loss = criterion(pred[train_mask], labels[train_mask])
@@ -61,7 +70,12 @@ def train_egraphsage(G, num_epochs=200, lr=1e-3, device='cpu', verbose=True, see
     print(f"\n⏱️ Tempo di addestramento su {device}: {train_time:.2f} secondi")
 
     start_time = timeit.default_timer()
-
+    peak_mem = 0
+    if th.cuda.is_available():
+        th.cuda.synchronize()  # Assicura che tutto sia completato
+        peak_mem = th.cuda.max_memory_allocated(device) / 1024**2
+        print(f"[GPU 🚀 Picco memoria GPU allocata: {peak_mem:.2f} MB")
+        
     model.eval()
     with th.no_grad():
         preds = model(G, node_features, edge_features)
@@ -69,15 +83,15 @@ def train_egraphsage(G, num_epochs=200, lr=1e-3, device='cpu', verbose=True, see
         labels_test = labels[test_mask].cpu()
 
         report_dict = classification_report(labels_test, preds_test, target_names=["Benign", "Malicious"], output_dict=True)
+        balanced_accuracy = balanced_accuracy_score(labels_test, preds_test)
+        cm = confusion_matrix(labels_test, preds_test)
         report_df = pd.DataFrame(report_dict).transpose()
         print("\n📊 Test set performance:")
         print(report_df)
     test_time = timeit.default_timer() - start_time
-    if th.cuda.is_available():
-        th.cuda.synchronize()  # Assicura che tutto sia completato
-        peak_mem = th.cuda.max_memory_allocated(device) / 1024**2
-        print(f"[GPU 🚀 Picco memoria GPU allocata: {peak_mem:.2f} MB")
-    return model, train_time, test_time, peak_mem, report_df
+
+            
+    return model, train_time, test_time, peak_mem, report_df, balanced_accuracy, cm
 
 
 def main():
@@ -108,6 +122,7 @@ def main():
             }
     else:
         datasets = {
+            'full': pd.read_csv('data/ToN_IoT/attack_cat/ToN_IoT_full.csv'),
             'dos': pd.read_csv('data/ToN_IoT/attack_cat/ToN_IoT_dos.csv'),
             'ddos': pd.read_csv('data/ToN_IoT/attack_cat/ToN_IoT_ddos.csv'),
             'backdoor': pd.read_csv('data/ToN_IoT/attack_cat/ToN_IoT_backdoor.csv'),
@@ -126,7 +141,7 @@ def main():
         print(f"\n📦 Costruzione grafo per: {name.upper()}")
         start_time = timeit.default_timer()
         if protocols == 'ToN':
-            G_dgl, _ = preprocess_ToN_dataset(df, scaler_type='standard')
+            G_dgl, _ = preprocess_ToN_dataset_optimized(df, scaler_type='standard')
         else:
             # G_dgl, _ = preprocess_NUSW_dataset(df, protocols, scaler_type='standard')
             G_dgl, _ = preprocess_NUSW_dataset_optimized(df, protocols, scaler_type='standard')
@@ -139,7 +154,7 @@ def main():
                 continue
 
             print(f"\n🚀 Addestramento del modello '{name.upper()}' su {device.upper()}")
-            model, train_time, test_time, peak_mem, report_df = train_egraphsage(G_dgl, num_epochs=200, lr=1e-3, device=device, verbose=True, seed=seed)
+            model, train_time, test_time, peak_mem, report_df, balanced_accuracy, cm= train_egraphsage(G_dgl, num_epochs=200, lr=1e-3, device=device, verbose=True, seed=seed)
 
             accuracy = report_df.loc["accuracy", "f1-score"]
             f1_malicious = report_df.loc["Malicious", "f1-score"]
@@ -148,17 +163,23 @@ def main():
 
             results.append({
                 "attack_cat": name,
-                "device": 'cuda:2',
+                "device": device,
                 "graph_time": round(graph_time, 2),
                 "train_time": round(train_time, 2),
                 "test_time": round(test_time, 4),
                 "peak_memory": round(peak_mem, 2),
                 "accuracy": round(accuracy, 5),
+                "bal_Accuracy": round(balanced_accuracy, 5),
                 "f1_malicious": round(f1_malicious, 5),
                 "precision_malicious": round(precision, 5),
                 "recall_malicious": round(recall, 5)
             })
-
+            plt.figure(figsize=(8, 6))
+            sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=['Benign', 'Attack'], yticklabels=['Benign', 'Attack'])
+            plt.xlabel('Predicted labels')
+            plt.ylabel('True labels')
+            plt.title('Confusion Matrix Random_Committee')
+            plt.savefig(f'confusion_matrix_gnn_{protocols}_{name}.png')
             # th.save(model.state_dict(), f"GNN/models/model_{name}_{device}_{protocols}_{seed}.pth")
             # print(f"✅ Modello salvato in: GNN/models/model_{name}_{device}_{seed}.pth")
             print(f"⏱️ Tempo su {device.upper()}: {train_time:.2f}s")

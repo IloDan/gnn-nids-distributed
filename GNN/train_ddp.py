@@ -7,9 +7,12 @@ import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 import dgl
 import pandas as pd
-from sklearn.metrics import classification_report
-from dataload import preprocess_NUSW_dataset, preprocess_ToN_dataset, preprocess_NUSW_dataset_optimized, preprocess_ToN_dataset_optimized, preprocess_partitioned_dataset_optimized
+from sklearn.metrics import classification_report, balanced_accuracy_score, confusion_matrix
+from dataload import  preprocess_NUSW_dataset_optimized, preprocess_ToN_dataset_optimized, preprocess_partitioned_dataset_optimized, preprocess_ToN_partitioned_dataset_optimized
 from EGraphSAGE import EGraphSAGE, compute_accuracy
+import seaborn as sns
+import matplotlib.pyplot as plt
+
 
 def set_seed(seed):
     import random
@@ -69,12 +72,12 @@ def synchronize_node_embeddings(G, async_op=True):
     return None, None
 
 
-def train(rank, world_size, G_full,protocols, num_epochs=100, lr=1e-3, save_path=None, seed=42):
+def train(rank, world_size, G_full, protocols, num_epochs=100, lr=1e-3, save_path=None, seed=42):
     
     set_seed(seed)
 
     device = th.device(f'cuda:{rank}')
-    if protocols != 'part':
+    if protocols == 'all' or protocols == 'ToN':
         G = partition_graph_edges(G_full, rank, world_size)
     else:
         G=G_full
@@ -120,6 +123,9 @@ def train(rank, world_size, G_full,protocols, num_epochs=100, lr=1e-3, save_path
         labels_test = labels[test_mask].cpu()
         report_dict = classification_report(labels_test, preds_test, target_names=["Benign", "Malicious"], output_dict=True)
         report_df = pd.DataFrame(report_dict).transpose()
+        balanced_acc = balanced_accuracy_score(labels_test, preds_test)
+        cm= confusion_matrix(labels_test, preds_test)
+
     # if save_path and rank == 0:
         # th.save(model.module.state_dict(), save_path)
     test_time = time.perf_counter() - start_test
@@ -127,7 +133,7 @@ def train(rank, world_size, G_full,protocols, num_epochs=100, lr=1e-3, save_path
         th.cuda.synchronize()  # Assicura che tutto sia completato
         peak_mem = th.cuda.max_memory_allocated(device) / 1024**2
         print(f"[GPU {rank}] 🚀 Picco memoria GPU allocata: {peak_mem:.2f} MB")
-    return train_time, test_time,  peak_mem, report_df
+    return train_time, test_time,  peak_mem, report_df, balanced_acc, cm
 
 
 def main():
@@ -160,6 +166,7 @@ def main():
             }
     else:
         datasets = {
+            'full': pd.read_csv('data/ToN_IoT/attack_cat/ToN_IoT_full.csv'),
             'dos': pd.read_csv('data/ToN_IoT/attack_cat/ToN_IoT_dos.csv'),
             'ddos': pd.read_csv('data/ToN_IoT/attack_cat/ToN_IoT_ddos.csv'),
             'backdoor': pd.read_csv('data/ToN_IoT/attack_cat/ToN_IoT_backdoor.csv'),
@@ -184,8 +191,9 @@ def main():
             G_dgl, _ = preprocess_ToN_dataset_optimized(df, scaler_type='standard')
         elif protocols == 'part':
             G_dgl = preprocess_partitioned_dataset_optimized(df, rank, world_size, protocols)
-        elif protocols == 'ToN_part':
-            G_dgl, _ = preprocess_ToN_dataset_optimized(df, scaler_type='standard')
+        elif protocols == 'ToNpart':
+            print("🚧 Preprocessing ToN partitioned dataset...")
+            G_dgl = preprocess_ToN_partitioned_dataset_optimized(df, rank, world_size)
         else:
             G_dgl, _ = preprocess_NUSW_dataset_optimized(df, protocols, scaler_type='standard')
 
@@ -194,7 +202,7 @@ def main():
         print(f"\n🚀 Addestramento del modello '{name.upper()}'")
         save_path = f"GNN/models/model_{name}_{protocols}_ddp_{seed}.pth" 
 
-        train_time, test_time,peak_mem, report_df = train(rank, world_size, G_dgl, protocols, 200, 1e-3, save_path, seed=seed)
+        train_time, test_time,peak_mem, report_df, balanced_acc, cm = train(rank, world_size, G_dgl, protocols, 200, 1e-3, save_path, seed=seed)
         
         if rank == 0:
             accuracy = report_df.loc["accuracy", "f1-score"]
@@ -211,15 +219,22 @@ def main():
                 "test_time": round(test_time, 4),
                 "peak_memory": round(peak_mem, 2),
                 "accuracy": round(accuracy, 5),
+                "bal_Accuracy": round(balanced_acc, 5),
                 "f1_malicious": round(f1_malicious, 5),
                 "precision_malicious": round(precision, 5),
                 "recall_malicious": round(recall, 5)
             })
+            plt.figure(figsize=(8, 6))
+            sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=['Benign', 'Attack'], yticklabels=['Benign', 'Attack'])
+            plt.xlabel('Predicted labels')
+            plt.ylabel('True labels')
+            plt.title('Confusion Matrix Random_Committee')
+            plt.savefig(f'ddp_confusion_matrix_gnn_{protocols}_{name}.png')
     cleanup()
 
     results_df = pd.DataFrame(results)
-    results_df.to_csv(f"GNN/results/ddp_training_results_{protocols}_{seed}.csv", index=False)
-    print(f"\n📄 Risultati salvati in GNN/results/ddp_training_results_{protocols}_{seed}.csv.csv")
+    results_df.to_csv(f"GNN/results/ddp_training_results_{protocols}_{seed}_cm .csv", index=False)
+    print(f"\n📄 Risultati salvati in GNN/results/ddp_training_results_{protocols}_{seed}_cm.csv")
 
 if __name__ == "__main__":
     main() #torchrun --nproc_per_node=2 --master_port=12355 GNN/train_ddp.py

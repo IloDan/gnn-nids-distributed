@@ -1,2 +1,0 @@
-attack_cat,device,training_time_sec,accuracy,f1_malicious,precision_malicious,recall_malicious
-full,cuda,102.48,0.99162,0.96661,0.96547,0.96776

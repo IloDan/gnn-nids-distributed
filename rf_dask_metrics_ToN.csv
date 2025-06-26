@@ -1,0 +1,2 @@
+attack_cat,device,graph_time,train_time,test_time,accuracy,bal_Accuracy,f1_malicious,precision_malicious,recall_malicious
+full,cuda:2,0,5.62,4.3897,0.99405,0.98456,0.97617,0.98049,0.97189
