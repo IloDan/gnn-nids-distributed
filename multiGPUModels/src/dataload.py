@@ -86,11 +86,17 @@ def preprocess_TON_dataset(df, scaler_type='standard'):
     df_train[feature_cols] = scaler.fit_transform(df_train[feature_cols])
     df_test[feature_cols] = scaler.transform(df_test[feature_cols])
 
+#shuffle the data
+    df_train = df_train.sample(frac=1, random_state=42).reset_index(drop=True)
+    df_test = df_test.sample(frac=1, random_state=42).reset_index(drop=True)    
+
     # Split features and labels
     X_train = df_train[feature_cols]
     y_train = df_train["Label"]
     X_test = df_test[feature_cols]
     y_test = df_test["Label"]
+    #shuffle the data
+    
 
     if y_train.nunique() < 2:
         raise ValueError("Il train-set contiene una sola classe; "

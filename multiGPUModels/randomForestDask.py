@@ -15,6 +15,48 @@ from sklearn.metrics import f1_score, precision_score, recall_score, balanced_ac
 from src.dataload import preprocess_NUSW_dataset, preprocess_TON_dataset
 
 
+
+import threading
+import pynvml 
+
+class GPUMemoryMonitor:
+    """
+    Campiona l'uso di memoria di un insieme di GPU
+    e mantiene il valore massimo (peak) osservato.
+    """
+    def __init__(self, gpu_ids=(0, 1), interval=0.1):
+        self.gpu_ids = gpu_ids
+        self.interval = interval
+        self.peak = {gpu: 0 for gpu in gpu_ids}
+        self._stop_event = threading.Event()
+
+    def _worker(self):
+        while not self._stop_event.is_set():
+            for gpu in self.gpu_ids:
+                handle = pynvml.nvmlDeviceGetHandleByIndex(gpu)
+                mem_used = pynvml.nvmlDeviceGetMemoryInfo(handle).used  # byte
+                if mem_used > self.peak[gpu]:
+                    self.peak[gpu] = mem_used
+            time.sleep(self.interval)
+
+    def start(self):
+        pynvml.nvmlInit()
+        self._thread = threading.Thread(target=self._worker, daemon=True)
+        self._thread.start()
+
+    def stop(self):
+        self._stop_event.set()
+        self._thread.join()
+        pynvml.nvmlShutdown()
+
+    def peak_mb(self):
+        # converte in MiB e arrotonda a due decimali
+        return {gpu: round(b / 1024 ** 2, 2) for gpu, b in self.peak.items()}
+
+
+
+
+
 class Timer:
     def __enter__(self):
         self.tick = time.time()
@@ -48,7 +90,7 @@ async def start_workers(scheduler_address):
 
 
 if __name__ == '__main__':
-    datasets = {
+    # datasets = {
         # 'full': pd.read_csv('data/NUSW_NB15/UNSW-NB15_splitted.csv'),
         # 'dos': pd.read_csv('data/NUSW_NB15/attack_cat_splitted/UNSW-NB15_dos.csv'),
         # 'fuzzers': pd.read_csv('data/NUSW_NB15/attack_cat_splitted/UNSW-NB15_fuzzers.csv'),
@@ -58,18 +100,18 @@ if __name__ == '__main__':
         # 'analysis': pd.read_csv('data/NUSW_NB15/attack_cat_splitted/UNSW-NB15_analysis.csv'),
         # 'shellcode': pd.read_csv('data/NUSW_NB15/attack_cat_splitted/UNSW-NB15_shellcode.csv'),
         # 'backdoor': pd.read_csv('data/NUSW_NB15/attack_cat_splitted/UNSW-NB15_backdoor.csv'),
-    }
+    # }
 
     datasets = {
         'full': pd.read_csv('data/ToN_IoT/attack_cat/ToN_IoT_full.csv'),
         'dos': pd.read_csv('data/ToN_IoT/attack_cat/ToN_IoT_dos.csv'),
-        # 'ddos': pd.read_csv('data/ToN_IoT/attack_cat/ToN_IoT_ddos.csv'),
-        # 'backdoor': pd.read_csv('data/ToN_IoT/attack_cat/ToN_IoT_backdoor.csv'),
-        # 'injection': pd.read_csv('data/ToN_IoT/attack_cat/ToN_IoT_injection.csv'),
-        # 'password': pd.read_csv('data/ToN_IoT/attack_cat/ToN_IoT_password.csv'),
-        # 'ransomware': pd.read_csv('data/ToN_IoT/attack_cat/ToN_IoT_ransomware.csv'),
-        # 'scanning': pd.read_csv('data/ToN_IoT/attack_cat/ToN_IoT_scanning.csv'),
-        # 'xss': pd.read_csv('data/ToN_IoT/attack_cat/ToN_IoT_xss.csv'),
+        'ddos': pd.read_csv('data/ToN_IoT/attack_cat/ToN_IoT_ddos.csv'),
+        'backdoor': pd.read_csv('data/ToN_IoT/attack_cat/ToN_IoT_backdoor.csv'),
+        'injection': pd.read_csv('data/ToN_IoT/attack_cat/ToN_IoT_injection.csv'),
+        'password': pd.read_csv('data/ToN_IoT/attack_cat/ToN_IoT_password.csv'),
+        'ransomware': pd.read_csv('data/ToN_IoT/attack_cat/ToN_IoT_ransomware.csv'),
+        'scanning': pd.read_csv('data/ToN_IoT/attack_cat/ToN_IoT_scanning.csv'),
+        'xss': pd.read_csv('data/ToN_IoT/attack_cat/ToN_IoT_xss.csv'),
     }
 
     all_metrics = []
@@ -86,19 +128,20 @@ if __name__ == '__main__':
         client = Client(cluster)
         asyncio.run(start_workers(cluster.scheduler.address))
         client.wait_for_workers(2)
-
-        # X_train_dask = dask_cudf.from_cudf(cudf.from_pandas(X_train), npartitions=8)
-        # y_train_dask = dask_cudf.from_cudf(cudf.from_pandas(y_train), npartitions=8)
-        # X_test_dask = dask_cudf.from_cudf(cudf.from_pandas(X_test), npartitions=8)  
-        nparts = 8                                   # ⇠ NEW  (≥ 4 × n_gpu)
-        X_train_dask = (dask_cudf
-                        .from_cudf(cudf.from_pandas(X_train), npartitions=nparts)
-                        .shuffle(on='Label', npartitions=nparts))              # ⇠ NEW
-        y_train_dask = (dask_cudf
-                        .from_cudf(cudf.from_pandas(y_train), npartitions=nparts)
-                        .shuffle(on='Label', npartitions=nparts))              # ⇠ NEW
-        X_test_dask  =  dask_cudf.from_cudf(cudf.from_pandas(X_test),
-                                            npartitions=nparts)
+        monitor = GPUMemoryMonitor(gpu_ids=[0, 1], interval=0.1)
+        monitor.start()
+        X_train_dask = dask_cudf.from_cudf(cudf.from_pandas(X_train), npartitions=2)
+        y_train_dask = dask_cudf.from_cudf(cudf.from_pandas(y_train), npartitions=2)
+        X_test_dask = dask_cudf.from_cudf(cudf.from_pandas(X_test), npartitions=2)  
+        nparts = 8                                  
+        # X_train_dask = (dask_cudf
+        #                 .from_cudf(cudf.from_pandas(X_train), npartitions=nparts)
+        #                 .shuffle(on='Label', npartitions=nparts))             
+        # y_train_dask = (dask_cudf
+        #                 .from_cudf(cudf.from_pandas(y_train), npartitions=nparts)
+        #                 .shuffle(on='Label', npartitions=nparts))              
+        # X_test_dask  =  dask_cudf.from_cudf(cudf.from_pandas(X_test),
+        #                                     npartitions=nparts)
 
 
 
@@ -110,9 +153,11 @@ if __name__ == '__main__':
         with Timer() as train_timer:
             rf.fit(X_train_dask, y_train_dask)
 
+
         with Timer() as test_timer:
             y_pred = rf.predict(X_test_dask).compute().astype('int32')
-
+        monitor.stop()
+        peak_mem = monitor.peak_mb()
         y_test = y_test.to_numpy()
         y_pred = y_pred.to_numpy()
 
@@ -137,6 +182,8 @@ if __name__ == '__main__':
             "graph_time": 0,
             "train_time": round(train_timer.elapsed, 2),
             "test_time": round(test_timer.elapsed, 4),
+            "peak_memory_gpu_0": peak_mem[0],
+            "peak_memory_gpu_1": peak_mem[1],
             "accuracy": round(accuracy, 5),
             "bal_Accuracy": round(bal_accuracy, 5),
             "f1_malicious": round(f1, 5),
@@ -145,13 +192,14 @@ if __name__ == '__main__':
         })
 
         rf._reset_forest_data()
+        cupy.get_default_memory_pool().free_all_blocks()
         del rf
         client.shutdown()
         client.close()
         time.sleep(2)
         cluster.close()
 
-    pd.DataFrame(all_metrics).to_csv("rf_dask_metrics_ToN.csv", index=False)
+    pd.DataFrame(all_metrics).to_csv("rf_dask_metrics_ToN_peak.csv", index=False)
 
 
 
