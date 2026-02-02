@@ -4,7 +4,7 @@
 Launch with torchrun, e.g.:
 
   torchrun --standalone --nnodes 1 --nproc_per_node 4 distributed_log_reg.py \
-      --dataset full --epochs 1500 --lr 1.5 --data_root data/ToN_IoT/attack_cat
+      --dataset full --epochs 1500 --lr 1.5 --data_root data/NUSW_NB15/attack_cat
 
 Every process handles its own shard of the data thanks to ``DistributedSampler``;
 metrics are averaged across GPUs with ``torch.distributed.all_reduce`` and only
@@ -13,11 +13,13 @@ rank‑0 writes the final CSV.
 from __future__ import annotations
 
 import argparse
+import ast
 import os
 from pathlib import Path
 from typing import Tuple, Dict
 
 import pandas as pd
+from src.utils import get_qfs_target_feature_k_rows
 import numpy as np
 import torch
 import torch.nn as nn
@@ -88,92 +90,132 @@ def train_one_dataset(
     args: argparse.Namespace,
     rank: int,
     world: int,
-) -> Dict[str, float]:
-    """Train & evaluate on a single attack category or full dataset.
+) -> list[Dict[str, float]]:
+    print(f"\n=== Dataset: {name} ===")
+    
+    all_qfs_features = pd.read_csv('./data/QFS_features.csv', index_col=0)
+    selection_algorithms = ['QUBOCorrelation', 'QUBOMutualInformation', 'QUBOSVCBoosting']
+    QUBO_solvers = ['SimulatedAnnealing', 'SteepestDescent', 'TabuSampler']
+    
+    os.makedirs("figures", exist_ok=True)
 
-    Returns a dict with aggregated metrics (only meaningful on rank‑0).
-    """
-    # ➊ Pre‑process & split
-    if args.ton:
-        X_train, y_train, X_test, y_test = preprocess_TON_dataset(df, scaler_type="standard")
-    else:
-        X_train, y_train, X_test, y_test = preprocess_NUSW_dataset(df, scaler_type="standard")
+    results = []   # <── lista di metriche solo per rank 0
+    
+    for selection_algorithm in selection_algorithms:
+        print(f"\n=== Selection Algorithm: {selection_algorithm} ===")
+        for QUBO_solver in QUBO_solvers:
+            print(f"\n=== QUBO Solver: {QUBO_solver} ===")                
+            selected_features_df = all_qfs_features[
+                (all_qfs_features['category'] == name) &
+                (all_qfs_features['selection_algorithm_name'] == selection_algorithm) &
+                (all_qfs_features['QUBO_solver'] == QUBO_solver)
+            ].sort_values(by='target_feature_k')
+            
+            target_feature_ks = get_qfs_target_feature_k_rows(selected_features_df)
+            
+            for selected_features_row in (row.iloc[0] for row in target_feature_ks):
+                qfs_index = int(selected_features_row.name)
+                feature_k = int(selected_features_row['target_feature_k'])
+                selected_features = ast.literal_eval(selected_features_row['selected_features'])
+                            
+                # preprocess
+                if args.ton:
+                    X_train, y_train, X_test, y_test = preprocess_TON_dataset(
+                        df, scaler_type="standard"
+                    )
+                else:
+                    X_train, y_train, X_test, y_test = preprocess_NUSW_dataset(
+                        df, scaler_type="standard", qfs_features=selected_features
+                    )
 
-    X_train_np, X_test_np = X_train.values.astype(np.float32), X_test.values.astype(np.float32)
-    y_train_np, y_test_np = y_train.values.astype(np.float32), y_test.values.astype(np.float32)
+                X_train_np, X_test_np = X_train.values.astype(np.float32), X_test.values.astype(np.float32)
+                y_train_np, y_test_np = y_train.values.astype(np.float32), y_test.values.astype(np.float32)
 
-    train_ds = TensorDataset(torch.from_numpy(X_train_np), torch.from_numpy(y_train_np))
-    test_ds = TensorDataset(torch.from_numpy(X_test_np), torch.from_numpy(y_test_np))
+                train_ds = TensorDataset(torch.from_numpy(X_train_np), torch.from_numpy(y_train_np))
+                test_ds = TensorDataset(torch.from_numpy(X_test_np), torch.from_numpy(y_test_np))
 
-    # ➋ Distributed samplers / loaders
-    train_sampler = DistributedSampler(train_ds, num_replicas=world, rank=rank, shuffle=True)
-    test_sampler = DistributedSampler(test_ds, num_replicas=world, rank=rank, shuffle=False)
+                train_sampler = DistributedSampler(train_ds, num_replicas=world, rank=rank, shuffle=True)
+                test_sampler = DistributedSampler(test_ds, num_replicas=world, rank=rank, shuffle=False)
 
-    train_loader = DataLoader(train_ds, batch_size=args.batch_size, sampler=train_sampler, pin_memory=True)
-    test_loader = DataLoader(test_ds, batch_size=args.batch_size * 4, sampler=test_sampler, pin_memory=True)
+                train_loader = DataLoader(
+                    train_ds, batch_size=args.batch_size, sampler=train_sampler, pin_memory=True
+                )
+                test_loader = DataLoader(
+                    test_ds, batch_size=args.batch_size * 4, sampler=test_sampler, pin_memory=True
+                )
 
-    # ➌ Model
-    model = LogisticRegressionModel(input_dim=X_train_np.shape[1]).to(device)
-    model = DDP(model, device_ids=[device], output_device=device)
+                model = LogisticRegressionModel(input_dim=X_train_np.shape[1]).to(device)
+                model = DDP(model, device_ids=[device.index], output_device=device.index)
 
-    # ➍ Optim / sched
-    optimizer = optim.SGD(model.parameters(), lr=args.lr, weight_decay=1e-5)
-    scheduler = LambdaLR(optimizer, lr_lambda=lambda epoch: 1 / (1 + epoch * 1e-5))
-    criterion = nn.BCEWithLogitsLoss().to(device)
+                optimizer = optim.SGD(model.parameters(), lr=args.lr, weight_decay=1e-5)
+                scheduler = LambdaLR(optimizer, lr_lambda=lambda epoch: 1 / (1 + epoch * 1e-5))
+                criterion = nn.BCEWithLogitsLoss().to(device)
 
-    # ➎ Train
-    model.train()
-    for epoch in range(args.epochs):
-        train_sampler.set_epoch(epoch)
-        for xb, yb in train_loader:
-            xb = xb.to(device, non_blocking=True)
-            yb = yb.unsqueeze(1).to(device, non_blocking=True)
-            optimizer.zero_grad(set_to_none=True)
-            logits = model(xb)
-            loss = criterion(logits, yb)
-            loss.backward()
-            optimizer.step()
-        scheduler.step()
+                # train
+                model.train()
+                for epoch in range(args.epochs):
+                    train_sampler.set_epoch(epoch)
+                    for xb, yb in train_loader:
+                        xb = xb.to(device, non_blocking=True)
+                        yb = yb.unsqueeze(1).to(device, non_blocking=True)
+                        optimizer.zero_grad(set_to_none=True)
+                        logits = model(xb)
+                        loss = criterion(logits, yb)
+                        loss.backward()
+                        optimizer.step()
+                    scheduler.step()
+                
 
-    # ➏ Eval
-    model.eval()
-    y_true, y_pred = [], []
-    with torch.no_grad():
-        for xb, yb in test_loader:
-            xb = xb.to(device, non_blocking=True)
-            logits = model(xb)
-            preds = (torch.sigmoid(logits) > 0.5).float().cpu()
-            y_true.append(yb)
-            y_pred.append(preds.squeeze())
+                    # ➏ Eval
+                model.eval()
+                y_true, y_pred = [], []
+                with torch.no_grad():
+                    for xb, yb in test_loader:
+                        xb = xb.to(device, non_blocking=True)
+                        yb = yb.to(device, non_blocking=True)          # <-- target su GPU
 
-    y_true_t = torch.cat(y_true)
-    y_pred_t = torch.cat(y_pred)
+                        logits = model(xb)
+                        preds = (torch.sigmoid(logits) > 0.5).float()  # su GPU
 
-    # Gather across ranks
-    y_true_g = [torch.zeros_like(y_true_t) for _ in range(world)]
-    y_pred_g = [torch.zeros_like(y_pred_t) for _ in range(world)]
-    torch.distributed.all_gather(y_true_g, y_true_t)
-    torch.distributed.all_gather(y_pred_g, y_pred_t)
+                        y_true.append(yb)
+                        y_pred.append(preds.squeeze())
 
-    if rank == 0:
-        y_true_np = torch.cat(y_true_g).numpy().astype(int)
-        y_pred_np = torch.cat(y_pred_g).numpy().astype(int)
+                # concat su GPU
+                y_true_t = torch.cat(y_true)   # CUDA
+                y_pred_t = torch.cat(y_pred)   # CUDA
 
-        precision = precision_score(y_true_np, y_pred_np, pos_label=1, zero_division=0)
-        recall = recall_score(y_true_np, y_pred_np, pos_label=1, zero_division=0)
-        f1 = f1_score(y_true_np, y_pred_np, pos_label=1, zero_division=0)
-        bal_acc = balanced_accuracy_score(y_true_np, y_pred_np)
-        accuracy = (y_true_np == y_pred_np).mean()
+                # Gather across ranks (sempre CUDA con backend=nccl)
+                y_true_g = [torch.zeros_like(y_true_t) for _ in range(world)]
+                y_pred_g = [torch.zeros_like(y_pred_t) for _ in range(world)]
+                torch.distributed.all_gather(y_true_g, y_true_t)
+                torch.distributed.all_gather(y_pred_g, y_pred_t)
 
-        return {
-            "attack_cat": name,
-            "accuracy": accuracy,
-            "bal_accuracy": bal_acc,
-            "f1_malicious": f1,
-            "precision_malicious": precision,
-            "recall_malicious": recall,
-        }
-    return {}
+                if rank == 0:
+                    # ora posso tornare su CPU per le metriche
+                    y_true_np = torch.cat(y_true_g).cpu().numpy().astype(int)
+                    y_pred_np = torch.cat(y_pred_g).cpu().numpy().astype(int)
+
+                    precision = precision_score(y_true_np, y_pred_np, pos_label=1, zero_division=0)
+                    recall = recall_score(y_true_np, y_pred_np, pos_label=1, zero_division=0)
+                    f1 = f1_score(y_true_np, y_pred_np, pos_label=1, zero_division=0)
+                    bal_acc = balanced_accuracy_score(y_true_np, y_pred_np)
+                    accuracy = (y_true_np == y_pred_np).mean()
+
+                    results.append({
+                        "attack_cat": name,
+                        "qfs_index": qfs_index,
+                        "selection_algorithm_name": selection_algorithm,
+                        "QUBO_solver": QUBO_solver,
+                        "target_feature_k": feature_k,
+                        "accuracy": accuracy,
+                        "bal_accuracy": bal_acc,
+                        "f1_malicious": f1,
+                        "precision_malicious": precision,
+                        "recall_malicious": recall,
+                    })
+
+    return results if rank == 0 else []
+
 
 
 # ────────────────────────────────────────────────────────────────────────────────
@@ -233,9 +275,10 @@ def main():
     for k in keys:
         if rank == 0:
             print(f"⇒ Processing dataset: {k}")
-        res = train_one_dataset(k, datasets[k], device, args, rank, world)
+        res_list = train_one_dataset(k, datasets[k], device, args, rank, world)
         if rank == 0:
-            results.append(res)
+            results.extend(res_list)
+
 
     if rank == 0 and results:
         out_dir = Path("results")

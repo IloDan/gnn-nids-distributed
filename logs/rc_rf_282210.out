@@ -1,0 +1,236 @@
+
+===== Dataset: full =====
+
+=== Selection Algorithm: QUBOCorrelation ===
+
+=== QUBO Solver: SimulatedAnnealing ===
+
+=== QUBO Solver: SteepestDescent ===
+
+=== QUBO Solver: TabuSampler ===
+
+=== Selection Algorithm: QUBOMutualInformation ===
+
+=== QUBO Solver: SimulatedAnnealing ===
+
+=== QUBO Solver: SteepestDescent ===
+
+=== QUBO Solver: TabuSampler ===
+
+=== Selection Algorithm: QUBOSVCBoosting ===
+
+=== QUBO Solver: SimulatedAnnealing ===
+
+=== QUBO Solver: SteepestDescent ===
+
+=== QUBO Solver: TabuSampler ===
+
+===== Dataset: dos =====
+
+=== Selection Algorithm: QUBOCorrelation ===
+
+=== QUBO Solver: SimulatedAnnealing ===
+
+=== QUBO Solver: SteepestDescent ===
+
+=== QUBO Solver: TabuSampler ===
+
+=== Selection Algorithm: QUBOMutualInformation ===
+
+=== QUBO Solver: SimulatedAnnealing ===
+
+=== QUBO Solver: SteepestDescent ===
+
+=== QUBO Solver: TabuSampler ===
+
+=== Selection Algorithm: QUBOSVCBoosting ===
+
+=== QUBO Solver: SimulatedAnnealing ===
+
+=== QUBO Solver: SteepestDescent ===
+
+=== QUBO Solver: TabuSampler ===
+
+===== Dataset: fuzzers =====
+
+=== Selection Algorithm: QUBOCorrelation ===
+
+=== QUBO Solver: SimulatedAnnealing ===
+
+=== QUBO Solver: SteepestDescent ===
+
+=== QUBO Solver: TabuSampler ===
+
+=== Selection Algorithm: QUBOMutualInformation ===
+
+=== QUBO Solver: SimulatedAnnealing ===
+
+=== QUBO Solver: SteepestDescent ===
+
+=== QUBO Solver: TabuSampler ===
+
+=== Selection Algorithm: QUBOSVCBoosting ===
+
+=== QUBO Solver: SimulatedAnnealing ===
+
+=== QUBO Solver: SteepestDescent ===
+
+=== QUBO Solver: TabuSampler ===
+
+===== Dataset: exploits =====
+
+=== Selection Algorithm: QUBOCorrelation ===
+
+=== QUBO Solver: SimulatedAnnealing ===
+
+=== QUBO Solver: SteepestDescent ===
+
+=== QUBO Solver: TabuSampler ===
+
+=== Selection Algorithm: QUBOMutualInformation ===
+
+=== QUBO Solver: SimulatedAnnealing ===
+
+=== QUBO Solver: SteepestDescent ===
+
+=== QUBO Solver: TabuSampler ===
+
+=== Selection Algorithm: QUBOSVCBoosting ===
+
+=== QUBO Solver: SimulatedAnnealing ===
+
+=== QUBO Solver: SteepestDescent ===
+
+=== QUBO Solver: TabuSampler ===
+
+===== Dataset: generic =====
+
+=== Selection Algorithm: QUBOCorrelation ===
+
+=== QUBO Solver: SimulatedAnnealing ===
+
+=== QUBO Solver: SteepestDescent ===
+
+=== QUBO Solver: TabuSampler ===
+
+=== Selection Algorithm: QUBOMutualInformation ===
+
+=== QUBO Solver: SimulatedAnnealing ===
+
+=== QUBO Solver: SteepestDescent ===
+
+=== QUBO Solver: TabuSampler ===
+
+=== Selection Algorithm: QUBOSVCBoosting ===
+
+=== QUBO Solver: SimulatedAnnealing ===
+
+=== QUBO Solver: SteepestDescent ===
+
+=== QUBO Solver: TabuSampler ===
+
+===== Dataset: reconnaissance =====
+
+=== Selection Algorithm: QUBOCorrelation ===
+
+=== QUBO Solver: SimulatedAnnealing ===
+
+=== QUBO Solver: SteepestDescent ===
+
+=== QUBO Solver: TabuSampler ===
+
+=== Selection Algorithm: QUBOMutualInformation ===
+
+=== QUBO Solver: SimulatedAnnealing ===
+
+=== QUBO Solver: SteepestDescent ===
+
+=== QUBO Solver: TabuSampler ===
+
+=== Selection Algorithm: QUBOSVCBoosting ===
+
+=== QUBO Solver: SimulatedAnnealing ===
+
+=== QUBO Solver: SteepestDescent ===
+
+=== QUBO Solver: TabuSampler ===
+
+===== Dataset: analysis =====
+
+=== Selection Algorithm: QUBOCorrelation ===
+
+=== QUBO Solver: SimulatedAnnealing ===
+
+=== QUBO Solver: SteepestDescent ===
+
+=== QUBO Solver: TabuSampler ===
+
+=== Selection Algorithm: QUBOMutualInformation ===
+
+=== QUBO Solver: SimulatedAnnealing ===
+
+=== QUBO Solver: SteepestDescent ===
+
+=== QUBO Solver: TabuSampler ===
+
+=== Selection Algorithm: QUBOSVCBoosting ===
+
+=== QUBO Solver: SimulatedAnnealing ===
+
+=== QUBO Solver: SteepestDescent ===
+
+=== QUBO Solver: TabuSampler ===
+
+===== Dataset: shellcode =====
+
+=== Selection Algorithm: QUBOCorrelation ===
+
+=== QUBO Solver: SimulatedAnnealing ===
+
+=== QUBO Solver: SteepestDescent ===
+
+=== QUBO Solver: TabuSampler ===
+
+=== Selection Algorithm: QUBOMutualInformation ===
+
+=== QUBO Solver: SimulatedAnnealing ===
+
+=== QUBO Solver: SteepestDescent ===
+
+=== QUBO Solver: TabuSampler ===
+
+=== Selection Algorithm: QUBOSVCBoosting ===
+
+=== QUBO Solver: SimulatedAnnealing ===
+
+=== QUBO Solver: SteepestDescent ===
+
+=== QUBO Solver: TabuSampler ===
+
+===== Dataset: backdoor =====
+
+=== Selection Algorithm: QUBOCorrelation ===
+
+=== QUBO Solver: SimulatedAnnealing ===
+
+=== QUBO Solver: SteepestDescent ===
+
+=== QUBO Solver: TabuSampler ===
+
+=== Selection Algorithm: QUBOMutualInformation ===
+
+=== QUBO Solver: SimulatedAnnealing ===
+
+=== QUBO Solver: SteepestDescent ===
+
+=== QUBO Solver: TabuSampler ===
+
+=== Selection Algorithm: QUBOSVCBoosting ===
+
+=== QUBO Solver: SimulatedAnnealing ===
+
+=== QUBO Solver: SteepestDescent ===
+
+=== QUBO Solver: TabuSampler ===
+
+Metriche salvate in results/rc_metrics_NUSW.csv

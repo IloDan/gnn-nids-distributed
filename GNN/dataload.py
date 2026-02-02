@@ -8,7 +8,7 @@ import numpy as np
 from category_encoders import TargetEncoder
 
 
-def preprocess_NUSW_dataset(df, protocols='tcp', scaler_type='standard'):
+def preprocess_NUSW_dataset(df, protocols='tcp', scaler_type='standard', qfs_features=None):
     """
     Preprocessing completo per la costruzione del grafo DGL da un dataframe di attacchi.
     Restituisce il grafo DGL con edge features scalate, label, train_mask, test_mask.
@@ -66,6 +66,9 @@ def preprocess_NUSW_dataset(df, protocols='tcp', scaler_type='standard'):
         df_test['proto'] = encoder.transform(df_test['proto'])
         feature_cols.append('proto')
 
+    if qfs_features is not None:
+        feature_cols = list(set(feature_cols).intersection(set(qfs_features)))
+
     df_train['h'] = df_train[feature_cols].values.tolist()
 
     df_test['h'] = df_test[feature_cols].values.tolist()
@@ -95,7 +98,7 @@ def preprocess_NUSW_dataset(df, protocols='tcp', scaler_type='standard'):
 
     return G_dgl, scaler
 
-def preprocess_NUSW_dataset_optimized(df, protocols='all', scaler_type='standard'):
+def preprocess_NUSW_dataset_optimized(df, protocols='all', scaler_type='standard', qfs_features=None):
     """
     Preprocessing ottimizzato per costruire un grafo DGL dal dataset NUSW-NB15.
     Restituisce il grafo DGL con edge features scalate, label, train/test mask.
@@ -145,6 +148,9 @@ def preprocess_NUSW_dataset_optimized(df, protocols='all', scaler_type='standard
         df_train['proto'] = encoder.fit_transform(df_train['proto'], df_train['Label'])
         df_test['proto'] = encoder.transform(df_test['proto'])
         feature_cols.append('proto')
+
+    if qfs_features is not None:
+        feature_cols = list(set(feature_cols).intersection(set(qfs_features)))
 
     df_train['train_mask'] = 1
     df_test['train_mask'] = 0
@@ -318,7 +324,7 @@ def preprocess_ToN_dataset_optimized(df, scaler_type='standard'):
 
 
 
-def preprocess_partitioned_dataset(df, rank, world_size, protocols='all', scaler_type='standard'):
+def preprocess_partitioned_dataset(df, rank, world_size, protocols='all', scaler_type='standard', qfs_features=None):
 
     selected_features = [
         'IPSrcType', 'IPDstType', 
@@ -383,6 +389,8 @@ def preprocess_partitioned_dataset(df, rank, world_size, protocols='all', scaler
         df_test['proto'] = encoder.transform(df_test['proto'])
         feature_cols.append('proto')
 
+    if qfs_features is not None:
+        feature_cols = list(set(feature_cols).intersection(set(qfs_features)))
 
     df_train['h'] = df_train[feature_cols].values.tolist()
 
@@ -418,7 +426,7 @@ def preprocess_partitioned_dataset(df, rank, world_size, protocols='all', scaler
     return G_dgl
 
 
-def preprocess_partitioned_dataset_optimized(df, rank, world_size, protocols='all', scaler_type='standard'):
+def preprocess_partitioned_dataset_optimized(df, rank, world_size, protocols='all', scaler_type='standard', qfs_features=None):
     """
     Preprocessing ottimizzato per costruire un grafo DGL dal dataset NUSW-NB15.
     Restituisce il grafo DGL con edge features scalate, label, train/test mask.
@@ -478,6 +486,9 @@ def preprocess_partitioned_dataset_optimized(df, rank, world_size, protocols='al
         df_train['proto'] = encoder.fit_transform(df_train['proto'], df_train['Label'])
         df_test['proto'] = encoder.transform(df_test['proto'])
         feature_cols.append('proto')
+
+    if qfs_features is not None:
+        feature_cols = list(set(feature_cols).intersection(set(qfs_features)))
 
     df_train['train_mask'] = 1
     df_test['train_mask'] = 0

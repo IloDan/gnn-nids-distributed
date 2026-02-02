@@ -1,11 +1,32 @@
 # File di log
 *.log
-*.pyc
 
-# Cartelle 
+# Python bytecode / cache
+*.pyc
+__pycache__/
+**/__pycache__/
+*.pyo
+*.pyd
+
+# Jupyter
+.ipynb_checkpoints/
+**/.ipynb_checkpoints/
+
+# Ambienti virtuali
+.venv/
+venv/
+env/
+
+# Cartelle
 /data/
 /GNN/models/
 /models/
+
+# (OPZIONALE) Output / risultati: attiva solo se NON vuoi versionarhelp
+# logs/
+# results/
+# figures/
+# GNN/results/
 
 # File di configurazione locali
 config.local.json
@@ -13,3 +34,8 @@ config.local.json
 # File generati da IDE
 .vscode/
 .idea/
+
+# OS
+.DS_Store
+Thumbs.db
+

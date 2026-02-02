@@ -1,5 +1,7 @@
+import ast
 import os
 import timeit
+from utils import get_qfs_target_feature_k_rows
 import torch as th
 import torch.nn.functional as F
 import pandas as pd
@@ -132,62 +134,113 @@ def main():
             'scanning': pd.read_csv('data/ToN_IoT/attack_cat/ToN_IoT_scanning.csv'),
             'xss': pd.read_csv('data/ToN_IoT/attack_cat/ToN_IoT_xss.csv'),
         }
+    
+    all_qfs_features = pd.read_csv('./data/QFS_features.csv', index_col=0)
+    selection_algorithms = ['QUBOCorrelation', 'QUBOMutualInformation', 'QUBOSVCBoosting']
+    QUBO_solvers = ['SimulatedAnnealing', 'SteepestDescent', 'TabuSampler']
 
     os.makedirs("GNN/models", exist_ok=True)
     os.makedirs("GNN/results", exist_ok=True)
-    results = []
+    os.makedirs("figures", exist_ok=True)
+    
+    results_file = f"GNN/results/training_results_{protocols}_{seed}.csv"
+    try:
+        results_df = pd.read_csv(results_file)
+    except FileNotFoundError:
+        results_df = pd.DataFrame(columns=[
+            "attack_cat", "qfs_index", "selection_algorithm_name", "QUBO_solver",
+            "target_feature_k", "device", "graph_time", "train_time", "test_time", "peak_memory",
+            "accuracy", "bal_accuracy", "f1_malicious", "precision_malicious", "recall_malicious"
+        ])
+
     print(f"\n🌱 Esecuzione con seed {seed}")
     for name, df in datasets.items():
         print(f"\n📦 Costruzione grafo per: {name.upper()}")
-        start_time = timeit.default_timer()
-        if protocols == 'ToN':
-            G_dgl, _ = preprocess_ToN_dataset_optimized(df, scaler_type='standard')
-        else:
-            # G_dgl, _ = preprocess_NUSW_dataset(df, protocols, scaler_type='standard')
-            G_dgl, _ = preprocess_NUSW_dataset_optimized(df, protocols, scaler_type='standard')
-        graph_time = timeit.default_timer() - start_time
-        print(f"⏱️ Tempo di preprocessamento ottimizzato: {graph_time:.2f} secondi")
+        for selection_algorithm in selection_algorithms:
+            print(f"\n=== Selection Algorithm: {selection_algorithm} ===")
+            for QUBO_solver in QUBO_solvers:
+                print(f"\n=== QUBO Solver: {QUBO_solver} ===")                
+                selected_features_df = all_qfs_features[
+                    (all_qfs_features['category'] == name) &
+                    (all_qfs_features['selection_algorithm_name'] == selection_algorithm) &
+                    (all_qfs_features['QUBO_solver'] == QUBO_solver)
+                ].sort_values(by='target_feature_k')
+                
+                target_feature_ks = get_qfs_target_feature_k_rows(selected_features_df)
+                
+                # feature_ks = sorted(selected_features_df['target_feature_k'].unique())
+                for selected_features_row in (row.iloc[0] for row in target_feature_ks):
+                    qfs_index = int(selected_features_row.name)
+                    feature_k = int(selected_features_row['target_feature_k'])
+                
+                    if not results_df[
+                        (results_df['attack_cat'] == name) & 
+                        (results_df['selection_algorithm_name'] == selection_algorithm) & 
+                        (results_df['QUBO_solver'] == QUBO_solver) &
+                        (results_df['target_feature_k'] == feature_k)
+                        ].empty:
+                        print(f"Skipping k={feature_k} (already computed).")
+                        continue
 
-        for device in ['cuda']:
-            if device == 'cuda' and not th.cuda.is_available():
-                print(f"⚠️ GPU non disponibile, skip '{name.upper()}' su CUDA.")
-                continue
+                    print(f"\n--- Target Feature k: {feature_k} (QFS Index: {qfs_index}) ---")
+                    
+                    selected_features = ast.literal_eval(selected_features_row['selected_features'])
+                    
+                    start_time = timeit.default_timer()
+                    if protocols == 'ToN':
+                        G_dgl, _ = preprocess_ToN_dataset_optimized(df, scaler_type='standard')
+                    else:
+                        # G_dgl, _ = preprocess_NUSW_dataset(df, protocols, scaler_type='standard')
+                        G_dgl, _ = preprocess_NUSW_dataset_optimized(df, protocols, scaler_type='standard', qfs_features=selected_features)
+                    graph_time = timeit.default_timer() - start_time
+                    print(f"⏱️ Tempo di preprocessamento ottimizzato: {graph_time:.2f} secondi")
 
-            print(f"\n🚀 Addestramento del modello '{name.upper()}' su {device.upper()}")
-            model, train_time, test_time, peak_mem, report_df, balanced_accuracy, cm= train_egraphsage(G_dgl, num_epochs=200, lr=1e-3, device=device, verbose=True, seed=seed)
+                    for device in ['cuda']:
+                        if device == 'cuda' and not th.cuda.is_available():
+                            print(f"⚠️ GPU non disponibile, skip '{name.upper()}' su CUDA.")
+                            continue
 
-            accuracy = report_df.loc["accuracy", "f1-score"]
-            f1_malicious = report_df.loc["Malicious", "f1-score"]
-            precision = report_df.loc["Malicious", "precision"]
-            recall = report_df.loc["Malicious", "recall"]
+                        print(f"\n🚀 Addestramento del modello '{name.upper()}' su {device.upper()}")
+                        model, train_time, test_time, peak_mem, report_df, balanced_accuracy, cm= train_egraphsage(G_dgl, num_epochs=200, lr=1e-3, device=device, verbose=True, seed=seed)
 
-            results.append({
-                "attack_cat": name,
-                "device": device,
-                "graph_time": round(graph_time, 2),
-                "train_time": round(train_time, 2),
-                "test_time": round(test_time, 4),
-                "peak_memory": round(peak_mem, 2),
-                "accuracy": round(accuracy, 5),
-                "bal_Accuracy": round(balanced_accuracy, 5),
-                "f1_malicious": round(f1_malicious, 5),
-                "precision_malicious": round(precision, 5),
-                "recall_malicious": round(recall, 5)
-            })
-            plt.figure(figsize=(8, 6))
-            sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=['Benign', 'Attack'], yticklabels=['Benign', 'Attack'])
-            plt.xlabel('Predicted labels')
-            plt.ylabel('True labels')
-            plt.title('Confusion Matrix Random_Committee')
-            plt.savefig(f'confusion_matrix_gnn_{protocols}_{name}.png')
-            # th.save(model.state_dict(), f"GNN/models/model_{name}_{device}_{protocols}_{seed}.pth")
-            # print(f"✅ Modello salvato in: GNN/models/model_{name}_{device}_{seed}.pth")
-            print(f"⏱️ Tempo su {device.upper()}: {train_time:.2f}s")
-            print(f"⏱️ Test Time su {device.upper()}: {test_time:.2f}s")
+                        accuracy = report_df.loc["accuracy", "f1-score"]
+                        f1_malicious = report_df.loc["Malicious", "f1-score"]
+                        precision = report_df.loc["Malicious", "precision"]
+                        recall = report_df.loc["Malicious", "recall"]
 
-    results_df = pd.DataFrame(results)
-    results_df.to_csv(f"GNN/results/training_results_{protocols}_{seed}.csv", index=False)
-    print(f"\n📄 Risultati salvati in GNN/results/training_results_{protocols}_{seed}.csv")
+                        metrics_df = pd.DataFrame([{
+                            "attack_cat": name,
+                            "qfs_index": qfs_index,
+                            "selection_algorithm_name": selection_algorithm,
+                            "QUBO_solver": QUBO_solver,
+                            "target_feature_k": feature_k,
+                            "device": device,
+                            "graph_time": round(graph_time, 2),
+                            "train_time": round(train_time, 2),
+                            "test_time": round(test_time, 4),
+                            "peak_memory": round(peak_mem, 2),
+                            "accuracy": round(accuracy, 5),
+                            "bal_accuracy": round(balanced_accuracy, 5),
+                            "f1_malicious": round(f1_malicious, 5),
+                            "precision_malicious": round(precision, 5),
+                            "recall_malicious": round(recall, 5)
+                        }])
+                        
+                        results_df = pd.concat([results_df, metrics_df], ignore_index=True)
+                        
+                        plt.figure(figsize=(8, 6))
+                        sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=['Benign', 'Attack'], yticklabels=['Benign', 'Attack'])
+                        plt.xlabel('Predicted labels')
+                        plt.ylabel('True labels')
+                        plt.title(f'Confusion Matrix Random_Committee - {protocols} - {name} - QFS {qfs_index:05d}')
+                        plt.savefig(f'figures/confusion_matrix_gnn_{protocols}_{name}_QFS_{qfs_index:05d}.png')
+                        # th.save(model.state_dict(), f"GNN/models/model_{name}_{device}_{protocols}_{seed}.pth")
+                        # print(f"✅ Modello salvato in: GNN/models/model_{name}_{device}_{seed}.pth")
+                        print(f"⏱️ Tempo su {device.upper()}: {train_time:.2f}s")
+                        print(f"⏱️ Test Time su {device.upper()}: {test_time:.2f}s")
+
+                results_df.to_csv(results_file, index=False)
+                print(f"\n📄 Risultati salvati in {results_file}")
 
 if __name__ == "__main__":
     main()

@@ -1,7 +1,7 @@
 #!/bin/bash
 
-SEEDS=(42 123 999 2025 7)
-PROTOCOLS=("ToNpart" "ToN" "all" "part")
+SEEDS=(42)
+PROTOCOLS=("all" "part")
 NUM_GPUS=2
 PORT=12355
 

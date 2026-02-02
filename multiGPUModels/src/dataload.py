@@ -20,7 +20,7 @@ class Timer:
         self.tock = time.time()
         self.elapsed = self.tock - self.tick
 
-def preprocess_NUSW_dataset(df, scaler_type='standard'):
+def preprocess_NUSW_dataset(df, scaler_type='standard', qfs_features=None):
     selected_features = [
             'IPSrcType', 'IPDstType', 
             'SrcPortWellKnown', 'DstPortWellKnown', 
@@ -57,6 +57,9 @@ def preprocess_NUSW_dataset(df, scaler_type='standard'):
     df_train['proto'] = encoder.fit_transform(df_train['proto'], df_train['Label'])
     df_test['proto'] = encoder.transform(df_test['proto'])
     feature_cols.append('proto')
+
+    if qfs_features is not None:
+        feature_cols = list(set(feature_cols).intersection(set(qfs_features)))
 
     # Split features and labels
     X_train = df_train[feature_cols]
@@ -107,9 +110,9 @@ def preprocess_TON_dataset(df, scaler_type='standard'):
 
     return X_train, y_train, X_test, y_test
 
-def load_data_dask_NUWS(df, scaler_type='standard'):
+def load_data_dask_NUWS(df, scaler_type='standard', qfs_features=None):
     # Preprocess the dataset
-    X_train, y_train, X_test, y_test = preprocess_NUSW_dataset(df, scaler_type)
+    X_train, y_train, X_test, y_test = preprocess_NUSW_dataset(df, scaler_type, qfs_features)
     X_train_np = X_train.to_numpy(dtype=np.float32)
     X_test_np = X_test.to_numpy(dtype=np.float32)
     y_train_np = y_train.to_numpy(dtype=np.int32)

@@ -1,3 +1,4 @@
+import ast
 import asyncio
 import os
 import time
@@ -5,6 +6,7 @@ import cupy
 import cudf
 import dask_cudf
 import pandas as pd
+from src.utils import get_qfs_target_feature_k_rows
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -113,94 +115,147 @@ if __name__ == '__main__':
     #     'scanning': pd.read_csv('data/ToN_IoT/attack_cat/ToN_IoT_scanning.csv'),
     #     'xss': pd.read_csv('data/ToN_IoT/attack_cat/ToN_IoT_xss.csv'),
     # }
+    
+    all_qfs_features = pd.read_csv('./data/QFS_features.csv', index_col=0)
+    selection_algorithms = ['QUBOCorrelation', 'QUBOMutualInformation', 'QUBOSVCBoosting']
+    QUBO_solvers = ['SimulatedAnnealing', 'SteepestDescent', 'TabuSampler']
 
-    all_metrics = []
+    os.makedirs("results", exist_ok=True)
+    os.makedirs("figures", exist_ok=True)
 
+    results_file = "results/rf_dask_metrics_NUSW_peak.csv"
+    try:
+        results_df = pd.read_csv(results_file)
+    except FileNotFoundError:
+        results_df = pd.DataFrame(columns=[
+            "attack_cat", "qfs_index", "selection_algorithm_name", "QUBO_solver",
+            "target_feature_k", "device", "graph_time", "train_time", "test_time", "peak_memory_gpu_0", "peak_memory_gpu_1",
+            "accuracy", "bal_accuracy", "f1_malicious", "precision_malicious", "recall_malicious"
+        ])
+    
     for name, df in datasets.items():
-        X_train, y_train, X_test, y_test = preprocess_NUSW_dataset(df, scaler_type='standard')
-        # X_train, y_train, X_test, y_test = preprocess_TON_dataset(df, scaler_type='standard')
-        X_train = X_train.astype('float32')
-        X_test = X_test.astype('float32')
-        y_train = y_train.astype('int32')
-        y_test = y_test.astype('int32')
+        print(f"\n=== Dataset: {name} ===")
+        for selection_algorithm in selection_algorithms:
+            print(f"\n=== Selection Algorithm: {selection_algorithm} ===")
+            for QUBO_solver in QUBO_solvers:
+                print(f"\n=== QUBO Solver: {QUBO_solver} ===")                
+                selected_features_df = all_qfs_features[
+                    (all_qfs_features['category'] == name) &
+                    (all_qfs_features['selection_algorithm_name'] == selection_algorithm) &
+                    (all_qfs_features['QUBO_solver'] == QUBO_solver)
+                ].sort_values(by='target_feature_k')
+                
+                target_feature_ks = get_qfs_target_feature_k_rows(selected_features_df)
+                
+                # feature_ks = sorted(selected_features_df['target_feature_k'].unique())
+                for selected_features_row in (row.iloc[0] for row in target_feature_ks):
+                    qfs_index = int(selected_features_row.name)
+                    feature_k = int(selected_features_row['target_feature_k'])
+                
+                    if not results_df[
+                        (results_df['attack_cat'] == name) & 
+                        (results_df['selection_algorithm_name'] == selection_algorithm) & 
+                        (results_df['QUBO_solver'] == QUBO_solver) &
+                        (results_df['target_feature_k'] == feature_k)
+                        ].empty:
+                        print(f"Skipping k={feature_k} (already computed).")
+                        continue
+                    
+                    print(f"\n--- Target Feature k: {feature_k} (QFS Index: {qfs_index}) ---")
+                    
+                    selected_features = ast.literal_eval(selected_features_row['selected_features'])
+                    
+                    X_train, y_train, X_test, y_test = preprocess_NUSW_dataset(df, scaler_type='standard', qfs_features=selected_features)
+                    # X_train, y_train, X_test, y_test = preprocess_TON_dataset(df, scaler_type='standard')
+                    X_train = X_train.astype('float32')
+                    X_test = X_test.astype('float32')
+                    y_train = y_train.astype('int32')
+                    y_test = y_test.astype('int32')
 
-        cluster = LocalCluster(n_workers=0, threads_per_worker=1)
-        client = Client(cluster)
-        workers = asyncio.run(start_workers(cluster.scheduler.address))
-        client.wait_for_workers(2)
-        monitor = GPUMemoryMonitor(gpu_ids=[0, 1], interval=0.1)
-        monitor.start()
-        X_train_dask = dask_cudf.from_cudf(cudf.from_pandas(X_train), npartitions=2)
-        y_train_dask = dask_cudf.from_cudf(cudf.from_pandas(y_train), npartitions=2)
-        X_test_dask = dask_cudf.from_cudf(cudf.from_pandas(X_test), npartitions=2)  
-        nparts = 8                                  
-        # X_train_dask = (dask_cudf
-        #                 .from_cudf(cudf.from_pandas(X_train), npartitions=nparts)
-        #                 .shuffle(on='Label', npartitions=nparts))             
-        # y_train_dask = (dask_cudf
-        #                 .from_cudf(cudf.from_pandas(y_train), npartitions=nparts)
-        #                 .shuffle(on='Label', npartitions=nparts))              
-        # X_test_dask  =  dask_cudf.from_cudf(cudf.from_pandas(X_test),
-        #                                     npartitions=nparts)
+                    cluster = LocalCluster(n_workers=0, threads_per_worker=1)
+                    client = Client(cluster)
+                    asyncio.run(start_workers(cluster.scheduler.address))
+                    client.wait_for_workers(2)
+                    monitor = GPUMemoryMonitor(gpu_ids=[0, 1], interval=0.1)
+                    monitor.start()
+                    X_train_dask = dask_cudf.from_cudf(cudf.from_pandas(X_train), npartitions=2)
+                    y_train_dask = dask_cudf.from_cudf(cudf.from_pandas(y_train), npartitions=2)
+                    X_test_dask = dask_cudf.from_cudf(cudf.from_pandas(X_test), npartitions=2)  
+                    nparts = 8                                  
+                    # X_train_dask = (dask_cudf
+                    #                 .from_cudf(cudf.from_pandas(X_train), npartitions=nparts)
+                    #                 .shuffle(on='Label', npartitions=nparts))             
+                    # y_train_dask = (dask_cudf
+                    #                 .from_cudf(cudf.from_pandas(y_train), npartitions=nparts)
+                    #                 .shuffle(on='Label', npartitions=nparts))              
+                    # X_test_dask  =  dask_cudf.from_cudf(cudf.from_pandas(X_test),
+                    #                                     npartitions=nparts)
 
 
 
-        X_train_dask = X_train_dask.persist()
-        y_train_dask = y_train_dask.persist()
-        
-        rf = RandomForestClassifier(n_estimators=100, n_streams=1, random_state=0)
+                    X_train_dask = X_train_dask.persist()
+                    y_train_dask = y_train_dask.persist()
+                    
+                    rf = RandomForestClassifier(n_estimators=100, n_streams=1, random_state=0)
 
-        with Timer() as train_timer:
-            rf.fit(X_train_dask, y_train_dask)
-
-
-        with Timer() as test_timer:
-            y_pred = rf.predict(X_test_dask).compute().astype('int32')
-        monitor.stop()
-        peak_mem = monitor.peak_mb()
-        y_test = y_test.to_numpy()
-        y_pred = y_pred.to_numpy()
-
-        accuracy = accuracy_score(y_test, y_pred)
-        bal_accuracy = balanced_accuracy_score(y_test, y_pred)
-        f1 = f1_score(y_test, y_pred, pos_label=1)
-        precision = precision_score(y_test, y_pred, pos_label=1)
-        recall = recall_score(y_test, y_pred, pos_label=1)
+                    with Timer() as train_timer:
+                        rf.fit(X_train_dask, y_train_dask)
 
 
-        cm = confusion_matrix(y_test, y_pred)
-        # plt.figure(figsize=(8, 6))
-        # sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=['Benign', 'Attack'], yticklabels=['Benign', 'Attack'])
-        # plt.xlabel('Predicted labels')
-        # plt.ylabel('True labels')
-        # plt.title(f'Confusion Matrix RF - {name}')
-        # plt.savefig(f'confusion_matrix_RF_{name}_ToN.png')
+                    with Timer() as test_timer:
+                        y_pred = rf.predict(X_test_dask).compute().astype('int32')
+                    monitor.stop()
+                    peak_mem = monitor.peak_mb()
+                    y_test = y_test.to_numpy()
+                    y_pred = y_pred.to_numpy()
 
-        all_metrics.append({
-            "attack_cat": name,
-            "device": "cuda:2",
-            "graph_time": 0,
-            "train_time": round(train_timer.elapsed, 2),
-            "test_time": round(test_timer.elapsed, 4),
-            "peak_memory_gpu_0": peak_mem[0],
-            "peak_memory_gpu_1": peak_mem[1],
-            "accuracy": round(accuracy, 5),
-            "bal_Accuracy": round(bal_accuracy, 5),
-            "f1_malicious": round(f1, 5),
-            "precision_malicious": round(precision, 5),
-            "recall_malicious": round(recall, 5)
-        })
+                    accuracy = accuracy_score(y_test, y_pred)
+                    bal_accuracy = balanced_accuracy_score(y_test, y_pred)
+                    f1 = f1_score(y_test, y_pred, pos_label=1)
+                    precision = precision_score(y_test, y_pred, pos_label=1)
+                    recall = recall_score(y_test, y_pred, pos_label=1)
 
-        rf._reset_forest_data()
-        cupy.get_default_memory_pool().free_all_blocks()
-        del rf
-        for w in workers:
-            w.close()   # se serve, in alcuni ambienti va fatto con await; ma così spesso basta
-        client.close()
-        time.sleep(2)
-        cluster.close()
 
-    pd.DataFrame(all_metrics).to_csv("rf_dask_metrics_ToN_peak.csv", index=False)
+                    cm = confusion_matrix(y_test, y_pred)
+                    # plt.figure(figsize=(8, 6))
+                    # sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=['Benign', 'Attack'], yticklabels=['Benign', 'Attack'])
+                    # plt.xlabel('Predicted labels')
+                    # plt.ylabel('True labels')
+                    # plt.title(f'Confusion Matrix RF - {name} - QFS {qfs_index:05d}')
+                    # plt.savefig(f'figures/confusion_matrix_RF_{name}_QFS_{qfs_index:05d}_NUSW.png')
+
+                    metrics_df = pd.DataFrame([{
+                        "attack_cat": name,
+                        "qfs_index": qfs_index,
+                        "selection_algorithm_name": selection_algorithm,
+                        "QUBO_solver": QUBO_solver,
+                        "target_feature_k": feature_k,
+                        "device": "cuda:2",
+                        "graph_time": 0,
+                        "train_time": round(train_timer.elapsed, 2),
+                        "test_time": round(test_timer.elapsed, 4),
+                        "peak_memory_gpu_0": peak_mem[0],
+                        "peak_memory_gpu_1": peak_mem[1],
+                        "accuracy": round(accuracy, 5),
+                        "bal_accuracy": round(bal_accuracy, 5),
+                        "f1_malicious": round(f1, 5),
+                        "precision_malicious": round(precision, 5),
+                        "recall_malicious": round(recall, 5)
+                    }])
+
+                    results_df = pd.concat([results_df, metrics_df], ignore_index=True)
+
+                    rf._reset_forest_data()
+                    cupy.get_default_memory_pool().free_all_blocks()
+                    del rf
+                    client.shutdown()
+                    client.close()
+                    time.sleep(2)
+                    cluster.close()
+
+                results_df.to_csv(results_file, index=False)
+                # pd.DataFrame(all_metrics).to_csv("results/rf_dask_metrics_ToN_peak.csv", index=False)
+                print(f"\nMetriche salvate in {results_file}")
 
 
 

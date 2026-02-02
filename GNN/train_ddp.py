@@ -1,5 +1,7 @@
+import ast
 import os
 import time
+from utils import get_qfs_target_feature_k_rows
 import torch as th
 import torch.nn as nn
 import torch.optim as optim
@@ -176,65 +178,118 @@ def main():
             'scanning': pd.read_csv('data/ToN_IoT/attack_cat/ToN_IoT_scanning.csv'),
             'xss': pd.read_csv('data/ToN_IoT/attack_cat/ToN_IoT_xss.csv'),
         }
+    
+    all_qfs_features = pd.read_csv('./data/QFS_features.csv', index_col=0)
+    selection_algorithms = ['QUBOCorrelation', 'QUBOMutualInformation', 'QUBOSVCBoosting']
+    QUBO_solvers = ['SimulatedAnnealing', 'SteepestDescent', 'TabuSampler']
 
-    results = []
     os.makedirs("GNN/models", exist_ok=True)
     os.makedirs("GNN/results", exist_ok=True)
+    os.makedirs("figures", exist_ok=True)
+    
     rank = int(os.environ['RANK'])
     world_size = int(os.environ['WORLD_SIZE'])
     setup(rank, world_size)
     
+    results_file = f"GNN/results/ddp_training_results_{protocols}_{seed} .csv"
+    try:
+        results_df = pd.read_csv(results_file)
+    except FileNotFoundError:
+        results_df = pd.DataFrame(columns=[
+            "attack_cat", "qfs_index", "selection_algorithm_name", "QUBO_solver",
+            "target_feature_k", "device", "graph_time", "train_time", "test_time", "peak_memory",
+            "accuracy", "bal_accuracy", "f1_malicious", "precision_malicious", "recall_malicious"
+        ])
+    
     for name, df in datasets.items():
         print(f"\n📦 Costruzione grafo per: {name.upper()}")
-        start_time = time.perf_counter()
-        if protocols == 'ToN':
-            G_dgl, _ = preprocess_ToN_dataset_optimized(df, scaler_type='standard')
-        elif protocols == 'part':
-            G_dgl = preprocess_partitioned_dataset_optimized(df, rank, world_size, protocols)
-        elif protocols == 'ToNpart':
-            print("🚧 Preprocessing ToN partitioned dataset...")
-            G_dgl = preprocess_ToN_partitioned_dataset_optimized(df, rank, world_size)
-        else:
-            G_dgl, _ = preprocess_NUSW_dataset_optimized(df, protocols, scaler_type='standard')
+        for selection_algorithm in selection_algorithms:
+            print(f"\n=== Selection Algorithm: {selection_algorithm} ===")
+            for QUBO_solver in QUBO_solvers:
+                print(f"\n=== QUBO Solver: {QUBO_solver} ===")                
+                selected_features_df = all_qfs_features[
+                    (all_qfs_features['category'] == name) &
+                    (all_qfs_features['selection_algorithm_name'] == selection_algorithm) &
+                    (all_qfs_features['QUBO_solver'] == QUBO_solver)
+                ].sort_values(by='target_feature_k')
+                
+                target_feature_ks = get_qfs_target_feature_k_rows(selected_features_df)
+                
+                # feature_ks = sorted(selected_features_df['target_feature_k'].unique())
+                for selected_features_row in (row.iloc[0] for row in target_feature_ks):
+                    qfs_index = int(selected_features_row.name)
+                    feature_k = int(selected_features_row['target_feature_k'])
+                
+                    if not results_df[
+                        (results_df['attack_cat'] == name) & 
+                        (results_df['selection_algorithm_name'] == selection_algorithm) & 
+                        (results_df['QUBO_solver'] == QUBO_solver) &
+                        (results_df['target_feature_k'] == feature_k)
+                        ].empty:
+                        print(f"Skipping k={feature_k} (already computed).")
+                        continue
 
-        graph_time = time.perf_counter() - start_time
-        print(f"⏱️ Tempo di preprocessamento ottimizzato: {graph_time:.2f} secondi")
-        print(f"\n🚀 Addestramento del modello '{name.upper()}'")
-        save_path = f"GNN/models/model_{name}_{protocols}_ddp_{seed}.pth" 
+                    print(f"\n--- Target Feature k: {feature_k} (QFS Index: {qfs_index}) ---")
+                    
+                    selected_features = ast.literal_eval(selected_features_row['selected_features'])
+                    
+                    start_time = time.perf_counter()
+                    if protocols == 'ToN':
+                        G_dgl, _ = preprocess_ToN_dataset_optimized(df, scaler_type='standard')
+                    elif protocols == 'part':
+                        G_dgl = preprocess_partitioned_dataset_optimized(df, rank, world_size, protocols, qfs_features=selected_features)
+                    elif protocols == 'ToNpart':
+                        print("🚧 Preprocessing ToN partitioned dataset...")
+                        G_dgl = preprocess_ToN_partitioned_dataset_optimized(df, rank, world_size)
+                    else:
+                        G_dgl, _ = preprocess_NUSW_dataset_optimized(df, protocols, scaler_type='standard', qfs_features=selected_features)
 
-        train_time, test_time,peak_mem, report_df, balanced_acc, cm = train(rank, world_size, G_dgl, protocols, 200, 1e-3, save_path, seed=seed)
-        
-        if rank == 0:
-            accuracy = report_df.loc["accuracy", "f1-score"]
-            f1_malicious = report_df.loc["Malicious", "f1-score"]
-            precision = report_df.loc["Malicious", "precision"]
-            recall = report_df.loc["Malicious", "recall"]
-            print(f"✅Training Time: {train_time:.4f} seconds")
-            print(f"✅Test Time: {test_time:.4f} seconds")
-            results.append({
-                "attack_cat": name,
-                "device": 'cuda:2',
-                "graph_time": round(graph_time, 2),
-                "train_time": round(train_time, 2),
-                "test_time": round(test_time, 4),
-                "peak_memory": round(peak_mem, 2),
-                "accuracy": round(accuracy, 5),
-                "bal_Accuracy": round(balanced_acc, 5),
-                "f1_malicious": round(f1_malicious, 5),
-                "precision_malicious": round(precision, 5),
-                "recall_malicious": round(recall, 5)
-            })
-            plt.figure(figsize=(8, 6))
-            sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=['Benign', 'Attack'], yticklabels=['Benign', 'Attack'])
-            plt.xlabel('Predicted labels')
-            plt.ylabel('True labels')
-            plt.title('Confusion Matrix Random_Committee')
-            plt.savefig(f'ddp_confusion_matrix_gnn_{protocols}_{name}.png')
+                    graph_time = time.perf_counter() - start_time
+                    print(f"⏱️ Tempo di preprocessamento ottimizzato: {graph_time:.2f} secondi")
+                    print(f"\n🚀 Addestramento del modello '{name.upper()}'")
+                    save_path = f"GNN/models/model_{name}_{protocols}_ddp_{seed}.pth" 
+
+                    train_time, test_time,peak_mem, report_df, balanced_acc, cm = train(rank, world_size, G_dgl, protocols, 200, 1e-3, save_path, seed=seed)
+                    
+                    if rank == 0:
+                        accuracy = report_df.loc["accuracy", "f1-score"]
+                        f1_malicious = report_df.loc["Malicious", "f1-score"]
+                        precision = report_df.loc["Malicious", "precision"]
+                        recall = report_df.loc["Malicious", "recall"]
+                        print(f"✅Training Time: {train_time:.4f} seconds")
+                        print(f"✅Test Time: {test_time:.4f} seconds")
+                        
+                        metrics_df = pd.DataFrame([{
+                            "attack_cat": name,
+                            "qfs_index": qfs_index,
+                            "selection_algorithm_name": selection_algorithm,
+                            "QUBO_solver": QUBO_solver,
+                            "target_feature_k": feature_k,
+                            "device": 'cuda:2',
+                            "graph_time": round(graph_time, 2),
+                            "train_time": round(train_time, 2),
+                            "test_time": round(test_time, 4),
+                            "peak_memory": round(peak_mem, 2),
+                            "accuracy": round(accuracy, 5),
+                            "bal_accuracy": round(balanced_acc, 5),
+                            "f1_malicious": round(f1_malicious, 5),
+                            "precision_malicious": round(precision, 5),
+                            "recall_malicious": round(recall, 5)
+                        }])
+                        
+                        results_df = pd.concat([results_df, metrics_df], ignore_index=True)
+                        
+                        plt.figure(figsize=(8, 6))
+                        sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=['Benign', 'Attack'], yticklabels=['Benign', 'Attack'])
+                        plt.xlabel('Predicted labels')
+                        plt.ylabel('True labels')
+                        plt.title(f'Confusion Matrix Random_Committee - {protocols} - {name} - QFS {qfs_index:05d}')
+                        plt.savefig(f'figures/ddp_confusion_matrix_gnn_{protocols}_{name}_QFS_{qfs_index:05d}.png')
+
+                        results_df.to_csv(results_file, index=False)
+                        print(f"\n📄 Risultati salvati in {results_file}")
+
     cleanup()
-
-    results_df = pd.DataFrame(results)
-    results_df.to_csv(f"GNN/results/ddp_training_results_{protocols}_{seed}_cm .csv", index=False)
-    print(f"\n📄 Risultati salvati in GNN/results/ddp_training_results_{protocols}_{seed}_cm.csv")
 
 if __name__ == "__main__":
     main() #torchrun --nproc_per_node=2 --master_port=12355 GNN/train_ddp.py

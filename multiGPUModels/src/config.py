@@ -13,12 +13,3 @@ INPUT_SIZE = 62
 HIDDEN_SIZE = 512
 BATCH_SIZE_MODEL = 512
 LEARNING_RATE = 0.0001
-
-from dask_cuda import LocalCUDACluster
-from dask.distributed import Client
-
-if __name__ == "__main__":
-    with LocalCUDACluster(n_workers=2) as cluster:
-        with Client(cluster) as client:
-        # Your code here
-            pass
