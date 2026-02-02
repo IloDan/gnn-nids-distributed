@@ -90,35 +90,35 @@ async def start_workers(scheduler_address):
 
 
 if __name__ == '__main__':
-    # datasets = {
-        # 'full': pd.read_csv('data/NUSW_NB15/UNSW-NB15_splitted.csv'),
-        # 'dos': pd.read_csv('data/NUSW_NB15/attack_cat_splitted/UNSW-NB15_dos.csv'),
-        # 'fuzzers': pd.read_csv('data/NUSW_NB15/attack_cat_splitted/UNSW-NB15_fuzzers.csv'),
-        # 'exploits': pd.read_csv('data/NUSW_NB15/attack_cat_splitted/UNSW-NB15_exploits.csv'),
-        # 'generic': pd.read_csv('data/NUSW_NB15/attack_cat_splitted/UNSW-NB15_generic.csv'),
-        # 'reconnaissance': pd.read_csv('data/NUSW_NB15/attack_cat_splitted/UNSW-NB15_reconnaissance.csv'),
-        # 'analysis': pd.read_csv('data/NUSW_NB15/attack_cat_splitted/UNSW-NB15_analysis.csv'),
-        # 'shellcode': pd.read_csv('data/NUSW_NB15/attack_cat_splitted/UNSW-NB15_shellcode.csv'),
-        # 'backdoor': pd.read_csv('data/NUSW_NB15/attack_cat_splitted/UNSW-NB15_backdoor.csv'),
-    # }
-
     datasets = {
-        'full': pd.read_csv('data/ToN_IoT/attack_cat/ToN_IoT_full.csv'),
-        'dos': pd.read_csv('data/ToN_IoT/attack_cat/ToN_IoT_dos.csv'),
-        'ddos': pd.read_csv('data/ToN_IoT/attack_cat/ToN_IoT_ddos.csv'),
-        'backdoor': pd.read_csv('data/ToN_IoT/attack_cat/ToN_IoT_backdoor.csv'),
-        'injection': pd.read_csv('data/ToN_IoT/attack_cat/ToN_IoT_injection.csv'),
-        'password': pd.read_csv('data/ToN_IoT/attack_cat/ToN_IoT_password.csv'),
-        'ransomware': pd.read_csv('data/ToN_IoT/attack_cat/ToN_IoT_ransomware.csv'),
-        'scanning': pd.read_csv('data/ToN_IoT/attack_cat/ToN_IoT_scanning.csv'),
-        'xss': pd.read_csv('data/ToN_IoT/attack_cat/ToN_IoT_xss.csv'),
+        'full': pd.read_csv('data/NUSW_NB15/UNSW-NB15_splitted.csv'),
+        'dos': pd.read_csv('data/NUSW_NB15/attack_cat_splitted/UNSW-NB15_dos.csv'),
+        'fuzzers': pd.read_csv('data/NUSW_NB15/attack_cat_splitted/UNSW-NB15_fuzzers.csv'),
+        'exploits': pd.read_csv('data/NUSW_NB15/attack_cat_splitted/UNSW-NB15_exploits.csv'),
+        'generic': pd.read_csv('data/NUSW_NB15/attack_cat_splitted/UNSW-NB15_generic.csv'),
+        'reconnaissance': pd.read_csv('data/NUSW_NB15/attack_cat_splitted/UNSW-NB15_reconnaissance.csv'),
+        'analysis': pd.read_csv('data/NUSW_NB15/attack_cat_splitted/UNSW-NB15_analysis.csv'),
+        'shellcode': pd.read_csv('data/NUSW_NB15/attack_cat_splitted/UNSW-NB15_shellcode.csv'),
+        'backdoor': pd.read_csv('data/NUSW_NB15/attack_cat_splitted/UNSW-NB15_backdoor.csv'),
     }
+
+    # datasets = {
+    #     'full': pd.read_csv('data/ToN_IoT/attack_cat/ToN_IoT_full.csv'),
+    #     'dos': pd.read_csv('data/ToN_IoT/attack_cat/ToN_IoT_dos.csv'),
+    #     'ddos': pd.read_csv('data/ToN_IoT/attack_cat/ToN_IoT_ddos.csv'),
+    #     'backdoor': pd.read_csv('data/ToN_IoT/attack_cat/ToN_IoT_backdoor.csv'),
+    #     'injection': pd.read_csv('data/ToN_IoT/attack_cat/ToN_IoT_injection.csv'),
+    #     'password': pd.read_csv('data/ToN_IoT/attack_cat/ToN_IoT_password.csv'),
+    #     'ransomware': pd.read_csv('data/ToN_IoT/attack_cat/ToN_IoT_ransomware.csv'),
+    #     'scanning': pd.read_csv('data/ToN_IoT/attack_cat/ToN_IoT_scanning.csv'),
+    #     'xss': pd.read_csv('data/ToN_IoT/attack_cat/ToN_IoT_xss.csv'),
+    # }
 
     all_metrics = []
 
     for name, df in datasets.items():
-        # X_train, y_train, X_test, y_test = preprocess_NUSW_dataset(df, scaler_type='standard')
-        X_train, y_train, X_test, y_test = preprocess_TON_dataset(df, scaler_type='standard')
+        X_train, y_train, X_test, y_test = preprocess_NUSW_dataset(df, scaler_type='standard')
+        # X_train, y_train, X_test, y_test = preprocess_TON_dataset(df, scaler_type='standard')
         X_train = X_train.astype('float32')
         X_test = X_test.astype('float32')
         y_train = y_train.astype('int32')
@@ -126,7 +126,7 @@ if __name__ == '__main__':
 
         cluster = LocalCluster(n_workers=0, threads_per_worker=1)
         client = Client(cluster)
-        asyncio.run(start_workers(cluster.scheduler.address))
+        workers = asyncio.run(start_workers(cluster.scheduler.address))
         client.wait_for_workers(2)
         monitor = GPUMemoryMonitor(gpu_ids=[0, 1], interval=0.1)
         monitor.start()
@@ -194,7 +194,8 @@ if __name__ == '__main__':
         rf._reset_forest_data()
         cupy.get_default_memory_pool().free_all_blocks()
         del rf
-        client.shutdown()
+        for w in workers:
+            w.close()   # se serve, in alcuni ambienti va fatto con await; ma così spesso basta
         client.close()
         time.sleep(2)
         cluster.close()
