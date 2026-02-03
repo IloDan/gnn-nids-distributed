@@ -1,9 +1,10 @@
 # Serial Code Porting on HPC & Quantum Computing
 
-This repository contains the code, scripts, and configurations used for the project described in my thesis:
+This repository contains code, scripts, and configurations developed within a research collaboration (initially carried out as a research grant/project) involving the University of Rome Tor Vergata and Sogei, and later consolidated and extended as part of my Master’s thesis at the University of Modena and Reggio Emilia (UNIMORE), A.Y. 2024/2025.
 
-**Danilo Caputo – “Distributed Training in Traditional ML-based and GNN-based NIDS – A comparative study of multi-GPU optimization for Graph Neural Networks and ensemble methods”**  
-(UNIMORE, A.Y. 2024/2025)
+Thesis:
+Danilo Caputo – “Distributed Training in Traditional ML-based and GNN-based NIDS – A comparative study of multi-GPU optimization for Graph Neural Networks and ensemble methods”.
+
 
 The project focuses on porting a **serial** pipeline to **HPC** environments (multi-core / multi-GPU) and evaluating:
 - **Traditional ML** models with distributed execution
